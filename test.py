@@ -154,7 +154,9 @@ def run_crawler(novel_id, chapter_range):
 # 数据处理与导出
 def export_to_excel(comments_data):
     df = pd.DataFrame(comments_data, columns=["评论时间", "评论者", "评论内容", "章节", "页码"])
-    output_file = f'novel_{novel_id}_comments_{time.strftime("%Y%m%d_%H%M%S")}.xlsx'
+    
+    # 将文件保存到 Streamlit 可下载目录
+    output_file = f'/mnt/data/novel_{novel_id}_comments_{time.strftime("%Y%m%d_%H%M%S")}.xlsx'
     df.to_excel(output_file, index=False, engine='openpyxl')
 
     return output_file
