@@ -1,2 +1,6 @@
-beautifulsoup4
+streamlit
 requests
+beautifulsoup4
+html2text
+pandas
+openpyxl
