@@ -4,3 +4,4 @@ beautifulsoup4
 html2text
 pandas
 openpyxl
+lxml==4.9.1
