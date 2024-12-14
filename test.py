@@ -63,7 +63,8 @@ def get_chapter_titles_v2(novel_id):
             timeout=15,
         )
 
-        soup = bs4.BeautifulSoup(response.content.decode("gbk", errors="ignore"), "lxml")
+        # 改为使用 "html.parser" 解析器
+        soup = bs4.BeautifulSoup(response.content.decode("gbk", errors="ignore"), "html.parser")
 
         rows = soup.select("tr")
         for row in rows:
@@ -102,7 +103,8 @@ def get_comments_for_chapter(chapter_id, cookies=""):
                 timeout=15,
             )
 
-            soup = bs4.BeautifulSoup(response.content.decode("gbk", errors="ignore"), "lxml")
+            # 改为使用 "html.parser" 解析器
+            soup = bs4.BeautifulSoup(response.content.decode("gbk", errors="ignore"), "html.parser")
             comment_divs = soup.find_all("div", id=re.compile(r"comment_\d+"))
 
             if not comment_divs:
