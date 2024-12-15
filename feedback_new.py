@@ -191,41 +191,36 @@ def ensure_files_exist():
 
 ensure_files_exist()
 
-# 保存留言和回复
-message_lock = threading.Lock()  # 创建一个锁来保证线程安全
+# 创建一个锁来保证线程安全
+message_lock = threading.Lock()
 
-def save_message(name, message):
+# 保存留言
+def save_message(name, message, is_admin=False):
     with message_lock:
+        author = "管理员" if is_admin else name
         with open("messages.txt", "a", encoding="utf-8") as file:
-            file.write(f"{name}: {message}\n")
+            file.write(f"{author}: {message}\n")
+    st.write(f"已保存留言：{author}: {message}")  # 调试信息
 
+# 保存回复
 def save_reply_to_file(reply_index, reply_text):
     with message_lock:
         with open("replies.txt", "a", encoding="utf-8") as file:
             file.write(f"评论 {reply_index}: {reply_text}\n")
 
 # Streamlit 页面交互部分
-# 留言互动区
-st.write("---")
-st.header("💬 留言互动")
-
-# 保存留言和回复
-def save_message(name, message):
-    with open("messages.txt", "a", encoding="utf-8") as file:
-        file.write(f"{name}: {message}\n")
-    st.write(f"已保存留言：{name}: {message}")  # 调试信息
-
-def save_reply_to_file(reply_index, reply_text):
-    with open("replies.txt", "a", encoding="utf-8") as file:
-        file.write(f"评论 {reply_index}: {reply_text}\n")
+st.title("💬 留言互动")
 
 # 用户输入留言
 name = st.text_input("你的昵称：", "")
 message = st.text_area("想对我们说点什么：")
 
+# 是否由管理员发布留言的勾选框
+is_admin = st.checkbox("将留言标记为管理员发布")
+
 if st.button("提交留言"):
     if message.strip():
-        save_message(name, message)
+        save_message(name, message, is_admin)
         st.success("谢谢你的留言！我们会认真阅读的 😊")
     else:
         st.error("留言不能为空哦！")
