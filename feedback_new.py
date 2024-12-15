@@ -262,7 +262,7 @@ st.write(f"📄 **显示留言：第 {page_num} 页，共 {max_page} 页**")
 for idx, msg in enumerate(paged_messages):
     user_name, msg_text = msg.split(":", 1)
     related_replies = [r for r in replies if f"评论 {idx + 1}:" in r]
-    reply_text = related_replies[0].strip() if related_replies else "暂未回复"
+    reply_text = "\n".join([r.strip() for r in related_replies]) if related_replies else "暂未回复"
 
     st.write(f"**{user_name} 的留言：** {msg_text.strip()}")
     st.write(f"**^ ^ 回复：** {reply_text}")
@@ -278,10 +278,12 @@ for idx, msg in enumerate(paged_messages):
         else:
             st.error("回复不能为空哦！")
 
+
 # 在 Streamlit 页面显示结尾信息
 st.write("---")
 st.header("🎉 完成啦！")
 st.markdown("""
-    久等啦，嘿嘿~ 使用指南和上次的回复已经一起放到这个文档啦~
-    请查看：[使用指南与回复](https://docs.qq.com/doc/DT0pkdWR1UkVUZGJx)
-""")
+    久等啦，嘿嘿~ 使用指南和上次的回复已经一起放到这个文档啦~<br>
+    请查看：[使用指南与回复](https://docs.qq.com/doc/DT0pkdWR1UkVUZGJx)<br>
+    请查看：[lofter](https://docs.qq.com/sheet/DT0xRRW1mSmpuYUNS)
+""", unsafe_allow_html=True)
