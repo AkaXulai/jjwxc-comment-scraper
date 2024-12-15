@@ -191,16 +191,15 @@ def ensure_files_exist():
 
 ensure_files_exist()
 
-# 创建一个锁来保证线程安全
+# 创建一个锁来保证线程安全 
 message_lock = threading.Lock()
 
 # 保存留言
-def save_message(name, message, is_admin=False):
+def save_message(name, message):
     with message_lock:
-        author = "管理员" if is_admin else name
         with open("messages.txt", "a", encoding="utf-8") as file:
-            file.write(f"{author}: {message}\n")
-    st.write(f"已保存留言：{author}: {message}")  # 调试信息
+            file.write(f"{name}: {message}\n")
+    st.write(f"已保存留言：{name}: {message}")  # 调试信息
 
 # 保存回复
 def save_reply_to_file(reply_index, reply_text):
@@ -215,17 +214,14 @@ st.title("💬 留言互动")
 name = st.text_input("你的昵称：", "")
 message = st.text_area("想对我们说点什么：")
 
-# 是否由管理员发布留言的勾选框
-is_admin = st.checkbox("将留言标记为管理员发布")
-
 if st.button("提交留言"):
     if message.strip():
-        save_message(name, message, is_admin)
+        save_message(name, message)
         st.success("谢谢你的留言！我们会认真阅读的 😊")
     else:
         st.error("留言不能为空哦！")
 
-# 显示留言和管理员回复
+# 显示留言和楼中楼回复
 st.write("### 📝 留言板")
 
 try:
@@ -234,10 +230,6 @@ try:
 
     with open("replies.txt", "r", encoding="utf-8") as reply_file:
         replies = reply_file.readlines()
-
-    # 调试信息，检查是否正确读取留言和回复
-    st.write(f"留言内容：{messages}")  # 调试输出
-    st.write(f"回复内容：{replies}")  # 调试输出
 
 except FileNotFoundError:
     messages = []
