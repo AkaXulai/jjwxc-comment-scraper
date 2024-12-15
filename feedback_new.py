@@ -1,7 +1,9 @@
 import time
 import bs4
+import os
 import requests
 import re
+import threading
 import logging
 import html2text
 import pandas as pd
@@ -14,33 +16,36 @@ from requests.packages.urllib3.util.retry import Retry
 # 配置日志格式
 logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
 
-# Streamlit 页面设置
-st.title("晋江评论小助手")
-st.write("👋 欢迎使用，这里可以帮你快速爬取晋江文学城的章节评论并导出成 Excel 文件！")
+# 设置 Streamlit 界面
+st.title("晋江评论爬虫小助手")
 
-# 输入小说 ID 和章节范围
-novel_id = st.text_input("📘 请输入作品 ID：", "")
-chapter_range_input = st.text_input("📖 请输入章节范围（例如：1-5 或 1,3,5）：", "")
+# 输入作品 ID 和章节范围
+novel_id = st.text_input("请输入作品ID：", "")
+chapter_range_input = st.text_input("请输入章节范围（例如：1-5 或 1,3,5）：", "")
 
 # 提取章节范围
 def parse_chapter_range(chapter_range_input):
     chapter_range = []
     try:
-        if '-' in chapter_range_input:  # 连续区间
+        if '-' in chapter_range_input:  # 处理连续区间
             start, end = map(int, chapter_range_input.split('-'))
             chapter_range = list(range(start, end + 1))
-        elif ',' in chapter_range_input:  # 指定章节
+        elif ',' in chapter_range_input:  # 处理分开的章节号
             chapter_range = list(map(int, chapter_range_input.split(',')))
-        else:  # 单一章节
+        else:  # 如果是单个章节
             chapter_range = [int(chapter_range_input)]
     except ValueError:
         st.error("章节范围格式错误，请输入正确的范围（例如：1-5 或 1,3,5）。")
     return chapter_range
 
-# 创建会话
+# 核心爬取功能
 def create_session():
     session = requests.Session()
-    retry = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+    retry = Retry(
+        total=3,  # 重试次数
+        backoff_factor=1,  # 重试延迟时间
+        status_forcelist=[500, 502, 503, 504],  # 重试的 HTTP 状态码
+    )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount('https://', adapter)
     return session
@@ -50,15 +55,19 @@ def get_chapter_titles_v2(novel_id):
     global chapter_titles
     chapter_titles = {}
     try:
-        logging.info(f"正在获取小说 {novel_id} 的章节标题...")
+        logging.info(f"开始爬取小说 {novel_id} 的章节标题...")
         session = create_session()
         response = session.get(
             f"https://www.jjwxc.net/onebook.php?novelid={novel_id}",
-            headers={"User-Agent": "Mozilla/5.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+            },
             timeout=15,
         )
 
+        # 改为使用 "html.parser" 解析器
         soup = bs4.BeautifulSoup(response.content.decode("gbk", errors="ignore"), "html.parser")
+
         rows = soup.select("tr")
         for row in rows:
             cells = row.find_all("td")
@@ -71,9 +80,9 @@ def get_chapter_titles_v2(novel_id):
             if chapter_id.isdigit():
                 chapter_titles[int(chapter_id)] = chapter_title
 
-        logging.info(f"获取到 {len(chapter_titles)} 个章节标题。")
+        logging.info(f"成功提取章节标题，共 {len(chapter_titles)} 章。")
     except Exception as e:
-        logging.error(f"获取章节标题失败: {e}")
+        logging.error(f"提取章节标题失败: {e}")
 
 # 获取评论
 def get_comments_for_chapter(chapter_id, cookies=""):
@@ -81,19 +90,27 @@ def get_comments_for_chapter(chapter_id, cookies=""):
     try:
         page = 1
         while True:
-            logging.info(f"正在获取第 {chapter_id} 章，第 {page} 页的评论...")
+            logging.info(f"正在获取第 {chapter_id} 章，第 {page} 页评论...")
             response = requests.get(
                 "https://www.jjwxc.net/comment.php",
-                params={"novelid": novel_id, "chapterid": chapter_id, "page": page},
-                headers={"User-Agent": "Mozilla/5.0", "Cookie": cookies},
+                params={
+                    "novelid": novel_id,
+                    "chapterid": chapter_id,
+                    "page": page,
+                },
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+                    "Cookie": cookies,
+                },
                 timeout=15,
             )
 
+            # 改为使用 "html.parser" 解析器
             soup = bs4.BeautifulSoup(response.content.decode("gbk", errors="ignore"), "html.parser")
-            comment_divs = soup.find_all("div", id=re.compile(r"comment_\\d+"))
+            comment_divs = soup.find_all("div", id=re.compile(r"comment_\d+"))
 
             if not comment_divs:
-                logging.info(f"第 {chapter_id} 章，第 {page} 页没有更多评论。")
+                logging.info(f"第 {chapter_id} 章的第 {page} 页无评论，结束本章爬取。")
                 break
 
             for comment in comment_divs:
@@ -103,80 +120,107 @@ def get_comments_for_chapter(chapter_id, cookies=""):
                     name_re = re.compile(r"网友：\[[\s\S]*?\]")
 
                     comment_time = time_re.findall(comment_text)[0][5:].strip()
-                    commenter_name = name_re.findall(comment_text)[0][3:].strip() if name_re.findall(comment_text) else "匿名用户"
+                    try:
+                        commenter_name = name_re.findall(comment_text)[0][3:].strip()
+                    except IndexError:
+                        commenter_name = "匿名用户"
 
                     chapter_title = chapter_titles.get(chapter_id, "未知章节")
+
                     chapter_label = f"第{chapter_id}章 {chapter_title}"
 
                     comments_data.append([comment_time, commenter_name, comment_text, chapter_label, page])
+
                 except Exception as e:
                     logging.error(f"解析评论失败: {e}")
 
             page += 1
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(1, 3))  # 随机延迟
 
         return comments_data
     except Exception as e:
-        logging.error(f"爬取第 {chapter_id} 章评论失败: {e}")
+        logging.error(f"爬取章节 {chapter_id} 评论失败: {e}")
         return []
 
 # 执行爬取
 def run_crawler(novel_id, chapter_range):
     get_chapter_titles_v2(novel_id)
+    
     all_comments = []
     with ThreadPoolExecutor(max_workers=5) as executor:
         results = executor.map(get_comments_for_chapter, chapter_range)
         for result in results:
             all_comments.extend(result)
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(1, 3))  # 防止过于频繁的请求
 
     return all_comments
 
-# 导出评论数据到 Excel
+# 数据处理与导出
 def export_to_excel(comments_data):
     df = pd.DataFrame(comments_data, columns=["评论时间", "评论者", "评论内容", "章节", "页码"])
     output_file = f'novel_{novel_id}_comments_{time.strftime("%Y%m%d_%H%M%S")}.xlsx'
     df.to_excel(output_file, index=False, engine='openpyxl')
+
     return output_file
 
-# Streamlit 界面交互
+# Streamlit 页面交互
 if st.button("开始爬取"):
     if not novel_id or not chapter_range_input:
-        st.error("❗ 请填写作品 ID 和章节范围。")
+        st.error("请输入作品ID和章节范围")
     else:
         chapter_range = parse_chapter_range(chapter_range_input)
         if chapter_range:
-            with st.spinner("⏳ 正在努力爬取数据中，请稍候..."):
+            with st.spinner("正在爬取数据..."):
                 all_comments = run_crawler(novel_id, chapter_range)
 
             if all_comments:
                 output_file = export_to_excel(all_comments)
-                st.success("✅ 评论爬取完成！")
-                st.download_button(
-                    label="📂 点击下载评论数据", 
-                    data=open(output_file, "rb"), 
-                    file_name=output_file
-                )
-            else:
-                st.warning("⚠️ 未能获取到任何评论数据，请检查输入信息。")
+                st.success(f"评论数据已成功保存！文件：{output_file}")
+                st.download_button(label="下载评论数据", data=open(output_file, "rb"), file_name=output_file)
         else:
-            st.error("❌ 章节范围格式错误，请重新输入。")
+            st.error("章节范围格式错误，请输入正确的范围（例如：1-5 或 1,3,5）。")
 
-# 添加留言互动区
+# 确保文件存在
+def ensure_files_exist():
+    if not os.path.exists("messages.txt"):
+        with open("messages.txt", "w", encoding="utf-8"):
+            pass
+    if not os.path.exists("replies.txt"):
+        with open("replies.txt", "w", encoding="utf-8"):
+            pass
+
+ensure_files_exist()
+
+# 保存留言和回复
+message_lock = threading.Lock()  # 创建一个锁来保证线程安全
+
+def save_message(name, message):
+    with message_lock:
+        with open("messages.txt", "a", encoding="utf-8") as file:
+            file.write(f"{name}: {message}\n")
+
+def save_reply_to_file(reply_index, reply_text):
+    with message_lock:
+        with open("replies.txt", "a", encoding="utf-8") as file:
+            file.write(f"评论 {reply_index}: {reply_text}\n")
+
+# Streamlit 页面交互部分
+# 留言互动区
 st.write("---")
 st.header("💬 留言互动")
 
-# 保存留言及回复
+# 保存留言和回复
 def save_message(name, message):
     with open("messages.txt", "a", encoding="utf-8") as file:
         file.write(f"{name}: {message}\n")
+    st.write(f"已保存留言：{name}: {message}")  # 调试信息
 
-def save_reply(index, reply):
+def save_reply_to_file(reply_index, reply_text):
     with open("replies.txt", "a", encoding="utf-8") as file:
-        file.write(f"{index}: {reply}\n")
+        file.write(f"评论 {reply_index}: {reply_text}\n")
 
 # 用户输入留言
-name = st.text_input("你的名字：", "匿名用户")
+name = st.text_input("你的昵称：", "")
 message = st.text_area("想对我们说点什么：")
 
 if st.button("提交留言"):
@@ -186,19 +230,71 @@ if st.button("提交留言"):
     else:
         st.error("留言不能为空哦！")
 
-# 显示留言及管理员回复
+# 显示留言和管理员回复
 st.write("### 📝 留言板")
+
 try:
     with open("messages.txt", "r", encoding="utf-8") as msg_file:
         messages = msg_file.readlines()
 
     with open("replies.txt", "r", encoding="utf-8") as reply_file:
         replies = reply_file.readlines()
+
+    # 调试信息，检查是否正确读取留言和回复
+    st.write(f"留言内容：{messages}")  # 调试输出
+    st.write(f"回复内容：{replies}")  # 调试输出
+
 except FileNotFoundError:
     messages = []
     replies = []
 
-if messages:
-    for idx, msg in enumerate(messages):
-        st.write(f"{idx + 1}. {msg.strip()}")
-        corresponding_reply = next((r.split(": ", 1)[1].strip() for r in replies if r.startswith(f
+# 分页功能
+PAGE_SIZE = 5
+if len(messages) > 0:  
+    max_page = (len(messages) // PAGE_SIZE) + 1 if len(messages) % PAGE_SIZE != 0 else len(messages) // PAGE_SIZE
+    max_page = max(max_page, 1)
+
+    # 如果只有一页，直接显示第一页，不用slider
+    if max_page > 1:
+        page_num = st.slider("选择你想看的留言页", 1, max_page, 1)
+    else:
+        page_num = 1  # 如果只有一页，直接设置为1
+else:
+    page_num = 1  # 如果没有留言，默认显示第一页
+    max_page = 1  # 设置最大页数为1
+    st.write("目前没有留言哦")
+
+# 当前页的留言
+start_idx = (page_num - 1) * PAGE_SIZE
+end_idx = start_idx + PAGE_SIZE
+paged_messages = messages[start_idx:end_idx]
+
+st.write(f"📄 **显示留言：第 {page_num} 页，共 {max_page} 页**")
+
+# 显示留言和回复
+for idx, msg in enumerate(paged_messages):
+    user_name, msg_text = msg.split(":", 1)
+    related_replies = [r for r in replies if f"评论 {idx + 1}:" in r]
+    reply_text = related_replies[0].strip() if related_replies else "暂未回复"
+
+    st.write(f"**{user_name} 的留言：** {msg_text.strip()}")
+    st.write(f"**^ ^ 回复：** {reply_text}")
+
+    # 留言回复部分
+    reply_index = idx + 1
+    reply_text = st.text_area(f"对 {user_name} 的留言回复：", key=f"reply_{reply_index}")
+    if st.button(f"提交回复给 {user_name}", key=f"submit_reply_{reply_index}"):
+
+        if reply_text.strip():
+            save_reply_to_file(reply_index, reply_text)
+            st.success("回复成功！ 😊")
+        else:
+            st.error("回复不能为空哦！")
+
+# 在 Streamlit 页面显示结尾信息
+st.write("---")
+st.header("🎉 完成啦！")
+st.markdown("""
+    久等啦，嘿嘿~ 使用指南和上次的回复已经一起放到这个文档啦~
+    请查看：[使用指南与回复](https://docs.qq.com/doc/DT0pkdWR1UkVUZGJx)
+""")
